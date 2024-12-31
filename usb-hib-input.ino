@@ -23,6 +23,12 @@ const int rightPin = D3;
 // Define the GPIO pins connected to the buttons
 const uint8_t buttonPins[] = { D4, D5, D6, D7, D8, D9, D10, D11, D12, D13, D14, D15 };
 
+uint32_t previousButtons = 0;
+uint8_t previousStick = 0;
+
+uint32_t currentButtons = 0;
+uint8_t currentStick = 0;
+
 void setup() {
   // Manual begin() is required on core without built-in support e.g. mbed rp2040
   if (!TinyUSBDevice.isInitialized()) {
@@ -57,35 +63,42 @@ void setup() {
 }
 
 void process_hid() {
-  // used to avoid send multiple consecutive zero report for keyboard
-  static bool keyPressedPreviously = false;
-
-  gp.buttons = setButtonMask();
-  gp.hat = getDpadDirection();
-
   // skip if hid is not ready e.g still transferring previous report
   if (!usb_hid.ready()) return;
 
-  // if any input was LOW count will be >0
-  if (gp.buttons != 0 || gp.hat != 0) {
-    keyPressedPreviously = true;
+  // used to avoid send multiple consecutive zero report for keyboard
+  static bool reportSent = false;
+
+  currentButtons = getButtonMask();
+  currentStick = getDpadDirection();
+  gp.buttons = currentButtons;
+  gp.hat = currentStick;
+
+  // if any input then send report
+  if (currentButtons != 0 || currentStick != 0) {
     usb_hid.sendReport(0, &gp, sizeof(gp));
     digitalWrite(LED_BUILTIN, HIGH);
 
+    reportSent = true;
+    // save current values for next loop
+    previousButtons = currentButtons;
+    previousStick = currentStick;
+
   } else {
-    // Send All-zero report to indicate there is no keys pressed
-    // Most of the time, it is, though we don't need to send zero report
-    // every loop(), only a key is pressed in previous loop()
-    if (keyPressedPreviously) {
-      keyPressedPreviously = false;
+    // if there is no input
+    if (reportSent) {
+      // and a none-zero report was sent
+      // then send a zero report
       usb_hid.sendReport(0, &gp, sizeof(gp));
       digitalWrite(LED_BUILTIN, LOW);
+      // set false so another zero report will not be sent
+      reportSent = false;
     }
   }
 }
 
 // Function to set the bits of the button mask
-uint32_t setButtonMask() {
+uint32_t getButtonMask() {
   uint32_t buttonMask = 0;
 
   for (int i = 0; i < sizeof(buttonPins) / sizeof(buttonPins[0]); i++) {
@@ -97,7 +110,6 @@ uint32_t setButtonMask() {
 
   return buttonMask;
 }
-
 
 // Function to get the current D-pad direction
 hid_gamepad_hat_t getDpadDirection() {
